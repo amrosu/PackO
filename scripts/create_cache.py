@@ -118,35 +118,35 @@ def process_image(overviews, db_graph, input_filename, color, out_raster_srs):
 
         resolution = overviews['resolution'] * 2 ** (overviews['level']['max'] - tile_z)
 
-        MinTileCol = \
+        min_tile_col = \
             math.floor(round((tile_limits['LowerCorner'][0] - overviews['crs']['boundingBox']['xmin'])/(resolution*overviews['tileSize']['width']), 8))
-        MinTileRow = \
+        min_tile_row = \
             math.floor(round((overviews['crs']['boundingBox']['ymax']-tile_limits['UpperCorner'][1])/(resolution*overviews['tileSize']['height']), 8))
-        MaxTileCol = \
+        max_tile_col = \
             math.ceil(round((tile_limits['UpperCorner'][0] - overviews['crs']['boundingBox']['xmin'])/(resolution*overviews['tileSize']['width']), 8)) - 1
-        MaxTileRow = \
+        max_tile_row = \
             math.ceil(round((overviews['crs']['boundingBox']['ymax']-tile_limits['LowerCorner'][1])/(resolution*overviews['tileSize']['height']), 8)) - 1
 
         if str(tile_z) not in overviews['dataSet']['limits']:
             overviews['dataSet']['limits'][str(tile_z)] = {
-                'MinTileCol': MinTileCol,
-                'MinTileRow': MinTileRow,
-                'MaxTileCol': MaxTileCol,
-                'MaxTileRow': MaxTileRow,
+                'MinTileCol': min_tile_col,
+                'MinTileRow': min_tile_row,
+                'MaxTileCol': max_tile_col,
+                'MaxTileRow': max_tile_row,
             }
 
         else:
-            if MinTileCol < overviews['dataSet']['limits'][str(tile_z)]['MinTileCol']:
-                overviews['dataSet']['limits'][str(tile_z)]['MinTileCol'] = MinTileCol
-            if MinTileRow < overviews['dataSet']['limits'][str(tile_z)]['MinTileRow']:
-                overviews['dataSet']['limits'][str(tile_z)]['MinTileRow'] = MinTileRow
-            if MaxTileCol > overviews['dataSet']['limits'][str(tile_z)]['MaxTileCol']:
-                overviews['dataSet']['limits'][str(tile_z)]['MaxTileCol'] = MaxTileCol
-            if MaxTileRow > overviews['dataSet']['limits'][str(tile_z)]['MaxTileRow']:
-                overviews['dataSet']['limits'][str(tile_z)]['MaxTileRow'] = MaxTileRow
+            if min_tile_col < overviews['dataSet']['limits'][str(tile_z)]['MinTileCol']:
+                overviews['dataSet']['limits'][str(tile_z)]['MinTileCol'] = min_tile_col
+            if min_tile_row < overviews['dataSet']['limits'][str(tile_z)]['MinTileRow']:
+                overviews['dataSet']['limits'][str(tile_z)]['MinTileRow'] = min_tile_row
+            if max_tile_col > overviews['dataSet']['limits'][str(tile_z)]['MaxTileCol']:
+                overviews['dataSet']['limits'][str(tile_z)]['MaxTileCol'] = max_tile_col
+            if max_tile_row > overviews['dataSet']['limits'][str(tile_z)]['MaxTileRow']:
+                overviews['dataSet']['limits'][str(tile_z)]['MaxTileRow'] = max_tile_row
 
-        for tile_x in range(MinTileCol, MaxTileCol + 1):
-            for tile_y in range(MinTileRow, MaxTileRow + 1):
+        for tile_x in range(min_tile_col, max_tile_col + 1):
+            for tile_y in range(min_tile_row, max_tile_row + 1):
                 # on cree une image 3 canaux pour la tuile
                 opi = create_blank_tile(overviews, {'x': tile_x, 'y': tile_y, 'resolution': resolution}, 3, out_raster_srs)
                 # on reech l'OPI dans cette image
@@ -195,13 +195,13 @@ def process_image(overviews, db_graph, input_filename, color, out_raster_srs):
                     PNG_DRIVER.CreateCopy(tile_dir+"/graph.png", graph)
 
 
-def creation_jsonFile_itowns(cache, urlApi, layers, overviews):
+def creation_json_file_itowns(cache, url_api, layers, overviews):
     if verbose > 0:
-        print("~~~~creation_jsonFile_itowns", end='')
+        print("~~~~creation_json_file_itowns", end='')
 
     for layer in layers:
         source = {}
-        source["url"] = urlApi
+        source["url"] = url_api
         source["projection"] = overviews["crs"]['type'] + ":" + str(overviews["crs"]['code'])
         source["networkOptions"] = {"crossOrigin": "anonymous"}
         source["format"] = layer['format']
@@ -249,13 +249,13 @@ def main():
     except IOError:
         mtd = {}
 
-    cliche_dejaTraites = []
+    cliche_deja_traites = []
     for filename in list_filename:
         cliche = Path(filename).stem
 
         if cliche in overviews_dict['list_OPI']:
             # OPI déja traitée
-            cliche_dejaTraites.append(cliche)
+            cliche_deja_traites.append(cliche)
         else:
             print('nouvelle image: ', filename)
             color = [randrange(255), randrange(255), randrange(255)]
@@ -276,17 +276,17 @@ def main():
     with open(args.cache+'/overviews.json', 'w') as outfile:
         json.dump(overviews_dict, outfile)
 
-    LAYERS = [
+    layers = [
         {'name': 'ortho', 'format': 'image/png'},
         {'name': 'graph', 'format': 'image/png'},
         {'name': 'opi', 'format': 'image/png', 'prefix': args.prefix}
         ]
 
-    creation_jsonFile_itowns(args.cache, args.api, LAYERS, overviews_dict)
+    creation_json_file_itowns(args.cache, args.api, layers, overviews_dict)
 
-    print("\n", len(list_filename) - len(cliche_dejaTraites), "/", len(list_filename), "OPI(s) ajoutée(s)")
-    if len(cliche_dejaTraites) > 0:
-        print(cliche_dejaTraites, "déjà traitées : OPI non recalculée(s)")
+    print("\n", len(list_filename) - len(cliche_deja_traites), "/", len(list_filename), "OPI(s) ajoutée(s)")
+    if len(cliche_deja_traites) > 0:
+        print(cliche_deja_traites, "déjà traitées : OPI non recalculée(s)")
 
 
 if __name__ == "__main__":
