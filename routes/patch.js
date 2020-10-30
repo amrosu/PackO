@@ -95,6 +95,47 @@ function getTiles(features, overviews) {
   return tiles;
 }
 
+function createMask(tile, geoJson, overviews) {
+  return new Promise((resolve, reject) => {
+    try {
+      const xOrigin = overviews.crs.boundingBox.xmin;
+      const yOrigin = overviews.crs.boundingBox.ymax;
+      const Rmax = overviews.resolution;
+      const lvlMax = overviews.level.max;
+      const tileWidth = overviews.tileSize.width;
+      const tileHeight = overviews.tileSize.height;
+
+      const mask = PImage.make(tileWidth, tileHeight);
+      const ctx = mask.getContext('2d');
+      geoJson.features.forEach((feature) => {
+        // debug(feature.properties.color);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        let first = true;
+        /* eslint-disable no-restricted-syntax */
+        const resolution = Rmax * 2 ** (lvlMax - tile.z);
+        for (const point of feature.geometry.coordinates[0]) {
+          const i = Math.round((point[0] - xOrigin - tile.x * tileWidth * resolution)
+                / resolution);
+          const j = Math.round((yOrigin - point[1] - tile.y * tileHeight * resolution)
+                / resolution);
+          if (first) {
+            first = false;
+            ctx.moveTo(i, j);
+          } else {
+            ctx.lineTo(i, j);
+          }
+        }
+        ctx.closePath();
+        ctx.fill();
+      });
+      resolve(mask);
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 router.get('/patchs', [], (req, res) => {
   debug('~~~GET patchs');
   res.status(200).send(JSON.stringify(req.app.activePatchs));
@@ -110,12 +151,12 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
   const geoJson = params.geoJSON;
   const promises = [];
 
-  const xOrigin = overviews.crs.boundingBox.xmin;
-  const yOrigin = overviews.crs.boundingBox.ymax;
-  const Rmax = overviews.resolution;
-  const lvlMax = overviews.level.max;
-  const tileWidth = overviews.tileSize.width;
-  const tileHeight = overviews.tileSize.height;
+  // const xOrigin = overviews.crs.boundingBox.xmin;
+  // const yOrigin = overviews.crs.boundingBox.ymax;
+  // const Rmax = overviews.resolution;
+  // const lvlMax = overviews.level.max;
+  // const tileWidth = overviews.tileSize.width;
+  // const tileHeight = overviews.tileSize.height;
 
   let newPatchId = 0;
   for (let i = 0; i < req.app.activePatchs.features.length; i += 1) {
@@ -149,65 +190,123 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
       const urlGraphOutput = path.join(tileDir, `graph_${newPatchId}.png`);
       const urlOrthoOutput = path.join(tileDir, `ortho_${newPatchId}.png`);
 
-      const mask = PImage.make(tileWidth, tileHeight);
-      const ctx = mask.getContext('2d');
-      geoJson.features.forEach((feature) => {
-        // debug(feature.properties.color);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.beginPath();
-        let first = true;
-        /* eslint-disable no-restricted-syntax */
-        const resolution = Rmax * 2 ** (lvlMax - tile.z);
-        for (const point of feature.geometry.coordinates[0]) {
-          const i = Math.round((point[0] - xOrigin - tile.x * tileWidth * resolution)
-                / resolution);
-          const j = Math.round((yOrigin - point[1] - tile.y * tileHeight * resolution)
-                / resolution);
-          if (first) {
-            first = false;
-            ctx.moveTo(i, j);
-          } else {
-            ctx.lineTo(i, j);
-          }
-        }
-        ctx.closePath();
-        ctx.fill();
+      // const mask = createMask(tile, geoJson, overviews);
+
+      // const mask = PImage.make(tileWidth, tileHeight);
+      // const ctx = mask.getContext('2d');
+      // geoJson.features.forEach((feature) => {
+      //   // debug(feature.properties.color);
+      //   ctx.fillStyle = '#FFFFFF';
+      //   ctx.beginPath();
+      //   let first = true;
+      //   /* eslint-disable no-restricted-syntax */
+      //   const resolution = Rmax * 2 ** (lvlMax - tile.z);
+      //   for (const point of feature.geometry.coordinates[0]) {
+      //     const i = Math.round((point[0] - xOrigin - tile.x * tileWidth * resolution)
+      //           / resolution);
+      //     const j = Math.round((yOrigin - point[1] - tile.y * tileHeight * resolution)
+      //           / resolution);
+      //     if (first) {
+      //       first = false;
+      //       ctx.moveTo(i, j);
+      //     } else {
+      //       ctx.lineTo(i, j);
+      //     }
+      //   }
+      //   ctx.closePath();
+      //   ctx.fill();
+      // });
+
+      const sspromises = [];
+
+      const promisecreateMask = new Promise((resolve, reject) => {
+        createMask(tile, geoJson, overviews).then((mask) => {
+          // On patch le graph
+          /* eslint-disable no-param-reassign */
+          sspromises.push(jimp.read(urlGraph).then((graph) => {
+            for (let idx = 0; idx < 256 * 256 * 4; idx += 4) {
+              if (mask.data[idx + 3]) {
+                [graph.bitmap.data[idx],
+                  graph.bitmap.data[idx + 1],
+                  graph.bitmap.data[idx + 2]] = geoJson.features[0].properties.color;
+              }
+            }
+            graph.writeAsync(urlGraphOutput);
+          }).then(() => {
+            // debug('graph done');
+          }));
+
+          // On patch l ortho
+          /* eslint-disable no-param-reassign */
+          const promiseOrthoOpi = [jimp.read(urlOrtho), jimp.read(urlOpi)];
+          sspromises.push(Promise.all(promiseOrthoOpi).then((images) => {
+            const ortho = images[0];
+            const opi = images[1];
+            for (let idx = 0; idx < 256 * 256 * 4; idx += 4) {
+              if (mask.data[idx + 3]) {
+                ortho.bitmap.data[idx] = opi.bitmap.data[idx];
+                ortho.bitmap.data[idx + 1] = opi.bitmap.data[idx + 1];
+                ortho.bitmap.data[idx + 2] = opi.bitmap.data[idx + 2];
+              }
+            }
+            ortho.writeAsync(urlOrthoOutput);
+          }).then(() => {
+            // debug('ortho done');
+          }));
+
+          Promise.all(sspromises).then(() => {
+            debug('graph et ortho done');
+            tilesModified.push(tile);
+            resolve();
+          });
+        });
       });
 
-      // On patch le graph
-      /* eslint-disable no-param-reassign */
-      promises.push(jimp.read(urlGraph).then((graph) => {
-        for (let idx = 0; idx < 256 * 256 * 4; idx += 4) {
-          if (mask.data[idx + 3]) {
-            [graph.bitmap.data[idx],
-              graph.bitmap.data[idx + 1],
-              graph.bitmap.data[idx + 2]] = geoJson.features[0].properties.color;
-          }
-        }
-        return graph.writeAsync(urlGraphOutput);
-      }).then(() => {
-        debug('graph done');
-      }));
+      promises.push(promisecreateMask);
 
-      // On patch l ortho
-      /* eslint-disable no-param-reassign */
-      const promiseOrthoOpi = [jimp.read(urlOrtho), jimp.read(urlOpi)];
-      promises.push(Promise.all(promiseOrthoOpi).then((images) => {
-        const ortho = images[0];
-        const opi = images[1];
-        for (let idx = 0; idx < 256 * 256 * 4; idx += 4) {
-          if (mask.data[idx + 3]) {
-            ortho.bitmap.data[idx] = opi.bitmap.data[idx];
-            ortho.bitmap.data[idx + 1] = opi.bitmap.data[idx + 1];
-            ortho.bitmap.data[idx + 2] = opi.bitmap.data[idx + 2];
-          }
-        }
-        return ortho.writeAsync(urlOrthoOutput);
-      }).then(() => {
-        debug('ortho done');
-      }));
-      tilesModified.push(tile);
+      //   promises.push(createMask(tile, geoJson, overviews).then((mask) => {
+      //   // On patch le graph
+      //     /* eslint-disable no-param-reassign */
+      //     sspromises.push(jimp.read(urlGraph).then((graph) => {
+      //       debug('send promise');
+      //       for (let idx = 0; idx < 256 * 256 * 4; idx += 4) {
+      //         if (mask.data[idx + 3]) {
+      //           [graph.bitmap.data[idx],
+      //             graph.bitmap.data[idx + 1],
+      //             graph.bitmap.data[idx + 2]] = geoJson.features[0].properties.color;
+      //         }
+      //       }
+      //       graph.writeAsync(urlGraphOutput);
+      //     }).then(() => {
+      //       debug('graph done');
+      //     }));
+
+      //     // On patch l ortho
+      //     /* eslint-disable no-param-reassign */
+      //     const promiseOrthoOpi = [jimp.read(urlOrtho), jimp.read(urlOpi)];
+      //     sspromises.push(Promise.all(promiseOrthoOpi).then((images) => {
+      //       const ortho = images[0];
+      //       const opi = images[1];
+      //       for (let idx = 0; idx < 256 * 256 * 4; idx += 4) {
+      //         if (mask.data[idx + 3]) {
+      //           ortho.bitmap.data[idx] = opi.bitmap.data[idx];
+      //           ortho.bitmap.data[idx + 1] = opi.bitmap.data[idx + 1];
+      //           ortho.bitmap.data[idx + 2] = opi.bitmap.data[idx + 2];
+      //         }
+      //       }
+      //       ortho.writeAsync(urlOrthoOutput);
+      //     }).then(() => {
+      //       debug('ortho done');
+      //     }));
+
+      //     Promise.all(sspromises).then(() => {
+      //       debug('all sspromises done');
+      //     });
+
+    //     tilesModified.push(tile);
+    //   }));
     });
+
     if (outOfBoundsTiles.length) {
       const err = new Error();
       err.code = 404;
@@ -221,9 +320,11 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
       };
       throw err;
     }
+
     Promise.all(promises).then(() => {
-      debug('tout c est bien passé on peut mettre a jour les liens symboliques');
+      debug("tout c'est bien passé => mise a jour les liens symboliques");
       tilesModified.forEach((tile) => {
+        debug(tile, "debut'");
         const tileDir = path.join(global.dir_cache, tile.z, tile.y, tile.x);
         const urlGraph = path.join(tileDir, 'graph.png');
         const urlOrtho = path.join(tileDir, 'ortho.png');
@@ -245,6 +346,7 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
         // fs.symlinkSync(urlOrthoOutput, urlOrtho);
         fs.linkSync(urlGraphOutput, urlGraph);
         fs.linkSync(urlOrthoOutput, urlOrtho);
+        debug(tile, 'linkSync');
       });
       // on note le patch Id
       geoJson.features.forEach((feature) => {
