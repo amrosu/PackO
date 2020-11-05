@@ -2,7 +2,7 @@ const debug = require('debug')('patch');
 const router = require('express').Router();
 const fs = require('fs');
 const path = require('path');
-const jimp = require('jimp');
+// const jimp = require('jimp');
 const { body, matchedData } = require('express-validator');
 const GJV = require('geojson-validation');
 // const PImage = require('pureimage');
@@ -95,14 +95,16 @@ function getTiles(features, overviews) {
   return tiles;
 }
 
-async function processTile(dir_cache, tile, newPatchId, overviews, geoJson) {
-  const debug = require('debug')('patch');
-  const path = require('path');
+async function processTile(dirCache, tile, newPatchId, overviews, geoJson) {
+  /* eslint-disable global-require */
+  const processDebug = require('debug')('patch');
+  const processPath = require('path');
   const PImage = require('pureimage');
   const jimp = require('jimp');
+  /* eslint-enable global-require */
 
-  debug("process ", tile);
-  const tileDir = path.join(dir_cache, tile.z, tile.y, tile.x);
+  processDebug('process ', tile);
+  const tileDir = processPath.join(dirCache, tile.z, tile.y, tile.x);
   const tileWidth = overviews.tileSize.width;
   const tileHeight = overviews.tileSize.height;
   const Rmax = overviews.resolution;
@@ -111,11 +113,11 @@ async function processTile(dir_cache, tile, newPatchId, overviews, geoJson) {
   const yOrigin = overviews.crs.boundingBox.ymax;
   const promises = [];
 
-  const urlGraph = path.join(tileDir, 'graph.png');
-  const urlOrtho = path.join(tileDir, 'ortho.png');
-  const urlOpi = path.join(tileDir, `${geoJson.features[0].properties.cliche}.png`);
-  const urlGraphOutput = path.join(tileDir, `graph_${newPatchId}.png`);
-  const urlOrthoOutput = path.join(tileDir, `ortho_${newPatchId}.png`);
+  const urlGraph = processPath.join(tileDir, 'graph.png');
+  const urlOrtho = processPath.join(tileDir, 'ortho.png');
+  const urlOpi = processPath.join(tileDir, `${geoJson.features[0].properties.cliche}.png`);
+  const urlGraphOutput = processPath.join(tileDir, `graph_${newPatchId}.png`);
+  const urlOrthoOutput = processPath.join(tileDir, `ortho_${newPatchId}.png`);
 
   // Il y a parfois un bug sur le dessin du premier pixel
   // on cree donc un masque une ligne de plus
@@ -123,7 +125,7 @@ async function processTile(dir_cache, tile, newPatchId, overviews, geoJson) {
 
   const ctx = mask.getContext('2d');
   geoJson.features.forEach((feature) => {
-    // debug(feature.properties.color);
+    // processDebug(feature.properties.color);
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
     let first = true;
@@ -195,7 +197,7 @@ async function processTile(dir_cache, tile, newPatchId, overviews, geoJson) {
     }
     return graph.writeAsync(urlGraphOutput);
   }).then(() => {
-    debug('graph done');
+    processDebug('graph done');
   }));
 
   // On patch l ortho
@@ -213,12 +215,9 @@ async function processTile(dir_cache, tile, newPatchId, overviews, geoJson) {
     }
     return ortho.writeAsync(urlOrthoOutput);
   }).then(() => {
-    debug('ortho done');
+    processDebug('ortho done');
   }));
   await Promise.all(promises);
-  // .then(() => {
-  //   debug('traitement de la tuile terminé : ', tileDir);
-  // })
 }
 
 router.get('/patchs', [], (req, res) => {
@@ -271,8 +270,9 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
         debug('Out of bounds : ', urlGraph, urlOpi, urlOrtho);
         return;
       }
-      
-      promises.push(req.app.workerpool.exec(processTile, [global.dir_cache, tile, newPatchId, overviews, geoJson]));
+
+      promises.push(req.app.workerpool.exec(processTile,
+        [global.dir_cache, tile, newPatchId, overviews, geoJson]));
 
       // const urlGraphOutput = path.join(tileDir, `graph_${newPatchId}.png`);
       // const urlOrthoOutput = path.join(tileDir, `ortho_${newPatchId}.png`);
