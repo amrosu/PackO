@@ -97,13 +97,11 @@ function getTiles(features, overviews) {
 
 async function processTile(dirCache, tile, newPatchId, overviews, geoJson) {
   /* eslint-disable global-require */
-  const processDebug = require('debug')('patch');
   const processPath = require('path');
   const PImage = require('pureimage');
   const jimp = require('jimp');
   /* eslint-enable global-require */
 
-  processDebug('process ', tile);
   const tileDir = processPath.join(dirCache, tile.z, tile.y, tile.x);
   const tileWidth = overviews.tileSize.width;
   const tileHeight = overviews.tileSize.height;
@@ -125,7 +123,6 @@ async function processTile(dirCache, tile, newPatchId, overviews, geoJson) {
 
   const ctx = mask.getContext('2d');
   geoJson.features.forEach((feature) => {
-    // processDebug(feature.properties.color);
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
     let first = true;
@@ -196,8 +193,6 @@ async function processTile(dirCache, tile, newPatchId, overviews, geoJson) {
       }
     }
     return graph.writeAsync(urlGraphOutput);
-  }).then(() => {
-    processDebug('graph done');
   }));
 
   // On patch l ortho
@@ -214,8 +209,6 @@ async function processTile(dirCache, tile, newPatchId, overviews, geoJson) {
       }
     }
     return ortho.writeAsync(urlOrthoOutput);
-  }).then(() => {
-    processDebug('ortho done');
   }));
   await Promise.all(promises);
 }
@@ -235,13 +228,6 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
   const geoJson = params.geoJSON;
   const promises = [];
 
-  // const xOrigin = overviews.crs.boundingBox.xmin;
-  // const yOrigin = overviews.crs.boundingBox.ymax;
-  // const Rmax = overviews.resolution;
-  // const lvlMax = overviews.level.max;
-  // const tileWidth = overviews.tileSize.width;
-  // const tileHeight = overviews.tileSize.height;
-
   let newPatchId = 0;
   for (let i = 0; i < req.app.activePatchs.features.length; i += 1) {
     const id = req.app.activePatchs.features[i].properties.patchId;
@@ -252,7 +238,6 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
 
   const tiles = getTiles(geoJson.features, overviews);
   debug(tiles.length, 'tuiles intersectées');
-  const tilesModified = [];
 
   try {
     // Patch these tiles
@@ -272,72 +257,17 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
       }
 
       promises.push(req.app.workerpool.exec(processTile,
-        [global.dir_cache, tile, newPatchId, overviews, geoJson]));
-
-      // const urlGraphOutput = path.join(tileDir, `graph_${newPatchId}.png`);
-      // const urlOrthoOutput = path.join(tileDir, `ortho_${newPatchId}.png`);
-
-      // const mask = PImage.make(tileWidth, tileHeight);
-      // const ctx = mask.getContext('2d');
-      // geoJson.features.forEach((feature) => {
-      //   // debug(feature.properties.color);
-      //   ctx.fillStyle = '#FFFFFF';
-      //   ctx.beginPath();
-      //   let first = true;
-      //   /* eslint-disable no-restricted-syntax */
-      //   const resolution = Rmax * 2 ** (lvlMax - tile.z);
-      //   for (const point of feature.geometry.coordinates[0]) {
-      //     const i = Math.round((point[0] - xOrigin - tile.x * tileWidth * resolution)
-      //           / resolution);
-      //     const j = Math.round((yOrigin - point[1] - tile.y * tileHeight * resolution)
-      //           / resolution);
-      //     if (first) {
-      //       first = false;
-      //       ctx.moveTo(i, j);
-      //     } else {
-      //       ctx.lineTo(i, j);
-      //     }
-      //   }
-      //   ctx.closePath();
-      //   ctx.fill();
-      // });
-
-      // // On patch le graph
-      // /* eslint-disable no-param-reassign */
-      // promises.push(jimp.read(urlGraph).then((graph) => {
-      //   for (let idx = 0; idx < 256 * 256 * 4; idx += 4) {
-      //     if (mask.data[idx + 3]) {
-      //       [graph.bitmap.data[idx],
-      //         graph.bitmap.data[idx + 1],
-      //         graph.bitmap.data[idx + 2]] = geoJson.features[0].properties.color;
-      //     }
-      //   }
-      //   return graph.writeAsync(urlGraphOutput);
-      // }).then(() => {
-      //   debug('graph done');
-      // }));
-
-      // // On patch l ortho
-      // /* eslint-disable no-param-reassign */
-      // const promiseOrthoOpi = [jimp.read(urlOrtho), jimp.read(urlOpi)];
-      // promises.push(Promise.all(promiseOrthoOpi).then((images) => {
-      //   const ortho = images[0];
-      //   const opi = images[1];
-      //   for (let idx = 0; idx < 256 * 256 * 4; idx += 4) {
-      //     if (mask.data[idx + 3]) {
-      //       ortho.bitmap.data[idx] = opi.bitmap.data[idx];
-      //       ortho.bitmap.data[idx + 1] = opi.bitmap.data[idx + 1];
-      //       ortho.bitmap.data[idx + 2] = opi.bitmap.data[idx + 2];
-      //     }
-      //   }
-      //   return ortho.writeAsync(urlOrthoOutput);
-      // }).then(() => {
-      //   debug('ortho done');
-      // }));
-      // tilesModified.push(tile);
+        [global.dir_cache, tile, newPatchId, overviews, geoJson]).catch((error) => {
+        if ((error.message !== 'Pool terminated')
+              && (error.message !== 'Worker terminated')) {
+          debug('Worker error : ', error);
+        }
+      }));
     });
     debug(outOfBoundsTiles);
     if (outOfBoundsTiles.length) {
+      // on arrete les traitement en cours, s'il y en a
+      req.app.workerpool.terminate(true);
       const err = new Error();
       err.code = 404;
       err.msg = {
@@ -410,11 +340,13 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
     if (err.code === 404) {
       Promise.all(promises).then(() => {
         debug('Erreur => clean up');
-        tilesModified.forEach((tile) => {
+        tiles.forEach((tile) => {
           const tileDir = path.join(global.dir_cache, tile.z, tile.y, tile.x);
           debug(tileDir);
-          fs.unlinkSync(path.join(tileDir, `graph_${newPatchId}.png`));
-          fs.unlinkSync(path.join(tileDir, `ortho_${newPatchId}.png`));
+          const urlGraph = path.join(tileDir, `graph_${newPatchId}.png`);
+          if (fs.existsSync(urlGraph)) fs.unlinkSync(urlGraph);
+          const urlOrtho = path.join(tileDir, `ortho_${newPatchId}.png`);
+          if (fs.existsSync(urlOrtho)) fs.unlinkSync(urlOrtho);
         });
       });
     }
