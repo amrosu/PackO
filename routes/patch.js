@@ -100,6 +100,7 @@ async function processTile(dirCache, tile, newPatchId, overviews, geoJson) {
   const processPath = require('path');
   const PImage = require('pureimage');
   const jimp = require('jimp');
+  const fs = require('fs');
   /* eslint-enable global-require */
 
   const tileDir = processPath.join(dirCache, tile.z, tile.y, tile.x);
@@ -151,36 +152,18 @@ async function processTile(dirCache, tile, newPatchId, overviews, geoJson) {
       empty = false;
     }
   }
-  debug(empty);
+  // debug(empty);
   if (empty) {
-    debug('masque vide, on passe a la suite : ', tile);
+    // debug('masque vide, on passe a la suite : ', tile);
     return;
   }
 
-  // const mask = PImage.make(tileWidth, tileHeight);
-  // const ctx = mask.getContext('2d');
-  // geoJson.features.forEach((feature) => {
-  //   // debug(feature.properties.color);
-  //   ctx.fillStyle = '#FFFFFF';
-  //   ctx.beginPath();
-  //   let first = true;
-  //   /* eslint-disable no-restricted-syntax */
-  //   const resolution = Rmax * 2 ** (lvlMax - tile.z);
-  //   for (const point of feature.geometry.coordinates[0]) {
-  //     const i = Math.round((point[0] - xOrigin - tile.x * tileWidth * resolution)
-  //           / resolution);
-  //     const j = Math.round((yOrigin - point[1] - tile.y * tileHeight * resolution)
-  //           / resolution);
-  //     if (first) {
-  //       first = false;
-  //       ctx.moveTo(i, j);
-  //     } else {
-  //       ctx.lineTo(i, j);
-  //     }
-  //   }
-  //   ctx.closePath();
-  //   ctx.fill();
-  // });
+  if (!fs.existsSync(urlGraph) || !fs.existsSync(urlOrtho) || !fs.existsSync(urlOpi)) {
+    outOfBoundsTiles.push(`${global.dir_cache}/${tile.z}/${tile.y}/${tile.x}`);
+    // debug('Out of bounds : ', urlGraph, urlOpi, urlOrtho);
+    return false;
+  }
+
 
   // On patch le graph
   /* eslint-disable no-param-reassign */
@@ -211,6 +194,7 @@ async function processTile(dirCache, tile, newPatchId, overviews, geoJson) {
     return ortho.writeAsync(urlOrthoOutput);
   }));
   await Promise.all(promises);
+  return true;
 }
 
 router.get('/patchs', [], (req, res) => {
@@ -242,22 +226,31 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
   try {
     // Patch these tiles
     const outOfBoundsTiles = [];
+    const tilesModified = [];
     tiles.forEach((tile) => {
       // Patch du graph
       debug(tile);
-      const tileDir = path.join(global.dir_cache, tile.z, tile.y, tile.x);
-      const urlGraph = path.join(tileDir, 'graph.png');
-      const urlOrtho = path.join(tileDir, 'ortho.png');
-      const urlOpi = path.join(tileDir, `${geoJson.features[0].properties.cliche}.png`);
+      // const tileDir = path.join(global.dir_cache, tile.z, tile.y, tile.x);
+      // const urlGraph = path.join(tileDir, 'graph.png');
+      // const urlOrtho = path.join(tileDir, 'ortho.png');
+      // const urlOpi = path.join(tileDir, `${geoJson.features[0].properties.cliche}.png`);
       // debug(tileDir);
-      if (!fs.existsSync(urlGraph) || !fs.existsSync(urlOrtho) || !fs.existsSync(urlOpi)) {
-        outOfBoundsTiles.push(`${global.dir_cache}/${tile.z}/${tile.y}/${tile.x}`);
-        debug('Out of bounds : ', urlGraph, urlOpi, urlOrtho);
-        return;
-      }
+      
 
       promises.push(req.app.workerpool.exec(processTile,
-        [global.dir_cache, tile, newPatchId, overviews, geoJson]).catch((error) => {
+        [global.dir_cache, tile, newPatchId, overviews, geoJson]).then((res) => {
+          if (res == false){
+            outOfBoundsTiles.push(tile);
+            debug('outofbound ', tile);
+          }
+          else if (res == true){
+            tilesModified.push(tile);
+            debug('modified ', tile);
+          }
+          else{
+            debug('useless ', tile);
+          }
+        }).catch((error) => {
         if ((error.message !== 'Pool terminated')
               && (error.message !== 'Worker terminated')) {
           debug('Worker error : ', error);
@@ -265,6 +258,7 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
       }));
     });
     debug(outOfBoundsTiles);
+    debug(tilesModified);
     if (outOfBoundsTiles.length) {
       // on arrete les traitement en cours, s'il y en a
       req.app.workerpool.terminate(true);
@@ -282,7 +276,7 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
     }
     Promise.all(promises).then(() => {
       debug('tout c est bien passé on peut mettre a jour les liens symboliques');
-      tiles.forEach((tile) => {
+      tilesModified.forEach((tile) => {
         const tileDir = path.join(global.dir_cache, tile.z, tile.y, tile.x);
         const urlGraph = path.join(tileDir, 'graph.png');
         const urlOrtho = path.join(tileDir, 'ortho.png');
@@ -340,7 +334,7 @@ router.post('/patch', encapBody.bind({ keyName: 'geoJSON' }), [
     if (err.code === 404) {
       Promise.all(promises).then(() => {
         debug('Erreur => clean up');
-        tiles.forEach((tile) => {
+        tilesModified.forEach((tile) => {
           const tileDir = path.join(global.dir_cache, tile.z, tile.y, tile.x);
           debug(tileDir);
           const urlGraph = path.join(tileDir, `graph_${newPatchId}.png`);
